@@ -1,15 +1,17 @@
 # 
 # Preparing the Oshikoto synthetic data
 # - aggregate to "building-level" populations
-# - generate separate samples for simulation study
+# - create 'true' gridded population
 #
 # April 2021
 # Chris Jochem (w.c.jochem@soton.ac.uk)
 #
 
+
 options("rgdal_show_exportToProj4_warnings"="none")
 library(rgdal)
 library(rgeos)
+library(raster)
 
 # path to raw data
 # synthetic pop: https://doi.org/10.3390/data3030030
@@ -56,10 +58,33 @@ proj4string(hh) <- CRS("+init=epsg:4326")
 utm_km <- CRS("+proj=tmerc +ellps=WGS84 +lat_0=0 +lon_0=21 +k=0.9996 +x_0=800000 +y_0=2450000 +units=km")
 hh <- spTransform(hh, utm_km)
 bnd <- spTransform(bnd, utm_km)
-
   head(hh)
 
 # write out population data
 saveRDS(hh, file.path("/home/jochem/Documents/GitHub/pp_pop", "data", "pop.rds"))
 # write out boundary file
 saveRDS(bnd, file.path("/home/jochem/Documents/GitHub/pp_pop", "data", "bnd.rds"))
+
+# create gridded "true" population
+# aligned to projected utm_km grid 
+mg <- raster(paste0(dir, "/dat/osh_wpgp_ppp_2011_prj.tif")) # 100m res
+mg <- projectRaster(mg, crs=utm_km)
+mg <- raster::aggregate(mg, fact = 10) # 1km resolution
+
+# get cell locations for each building
+hh$cid <- cellFromXY(mg, hh)
+
+# aggregate values to cell-level
+popagg <- aggregate(list("pop"=hh$pop), by = list("cid"=hh$cid), sum)
+bldgagg <- aggregate(list("bldg"=hh$pop), by = list("cid"=hh$cid), length)
+
+# update grid with total pop
+pgrid <- raster(mg)
+bgrid <- raster(mg)
+
+pgrid[popagg$cid] <- popagg$pop
+bgrid[bldgagg$cid] <- bldgagg$bldg
+
+# output gridded datasets
+writeRaster(pgrid, file.path("/home/jochem/Documents/GitHub/pp_pop", "data", "pop.tif"))
+writeRaster(bgrid, file.path("/home/jochem/Documents/GitHub/pp_pop", "data", "buildings.tif"))
